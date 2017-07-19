@@ -56,10 +56,10 @@ BUG LIST:
         \_deduplicate_message(self, message) method defined at line 218.
 
         POSSIBLE FIXES:
-            \* Modify the library to only transmit once: we retransmit every few
+            * Modify the library to only transmit once: we retransmit every few
                 minutes anyway. (note: there is a FIXME comment in the library
                 which alludes to the idea that the CoAP spec differs from the
                 aiocoap implementation of multicast retransmission.)
-            \* Extend the library to override the \_deduplicate_message method in
+            * Extend the library to override the \_deduplicate_message method in
                 order to change that behavior without modifying the library.
-            \* Reroute error output to an actual log file?
+            * Reroute error output to an actual log file?
