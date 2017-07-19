@@ -47,32 +47,21 @@ TODO:
     6. REFACTOR INTO SEPARATE MODULES. [ ]
 
 BUG LIST:
-    0. Running this script makes my home WiFi unusable. Need packet captures to
-        figure out why.
-        Possible explanations:
-            * Not using as many sleep() calls as initially planned
-            * Generating packets as expected, but it's too many for my router
-            * The Edison board's IoTivity examples could be generating too much
-                traffic
-            * The Edison could be DoSing my router with DNS requests
-            * The Edison might be misconfigured in some other way
-        Going to use my mobile phone as a hotspot, connect Edison and laptop,
-            and try to gather some data.
-            * Couldn't reproduce. 1357 packets seen by laptop in 378 seconds.
-                Not much traffic.
-        Next step: soft AP broadcasted from laptop in order to capture all
-            traffic. USB tether to still have internet access? Bridge to a cat5
-            cable?
     1. Testing against the IoTivity example simpleserver, the console gets full
         of 'INFO:coap:Duplicate NON, ACK or RST received' messages.
         These are issued from line 230 of aiocoap/protocol.py, in the
         _deduplicate_message(self, message) method defined at line 218.
 
-Created on Jun 7, 2017
+        POSSIBLE FIXES:
+            * Modify the library to only transmit once: we retransmit every few
+                minutes anyway.
+            * Extend the library to override the _deduplicate_message method in
+                order to change that behavior without modifying the library.
+            *
+
+Last updated on July 19, 2017
 
 @author: Noah Cain
-Based in part on code from:
-http://aiocoap.readthedocs.io/en/latest/examples.html
 """
 
 import logging
