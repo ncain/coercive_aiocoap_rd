@@ -12,6 +12,7 @@ resources must be tracked separately. This could be achieved by adding a manual
 "register" function to this module, but I'm unsure how to automate it.
 
 DONE:
+
     0. Implement active interrogation of the network for resources. [✔]
         0a. Send queries for /oic/res to multicast group addresses. [✔]
         0b. Parse received answers for storage as known resources. [✔]
@@ -44,18 +45,21 @@ DONE:
             2b(ii). Instantiate and utilize the Resource_Set [✔]
 
 TODO:
+
     3. Implement manual registration for unicast-only resource storage? [ ]
     4. Implement persistent storage of known resources (files or db?). [ ]
     5. TEST THOROUGHLY. [ ]
     6. REFACTOR INTO SEPARATE MODULES. [ ]
 
 BUG LIST:
+
     1. Testing against the IoTivity example simpleserver, the console gets full
         of 'INFO:coap:Duplicate NON, ACK or RST received' messages.
         These are issued from line 230 of aiocoap/protocol.py, in the
         \_deduplicate_message(self, message) method defined at line 218.
 
         POSSIBLE FIXES:
+
             * Modify the library to only transmit once: we retransmit every few
                 minutes anyway. (note: there is a FIXME comment in the library
                 which alludes to the idea that the CoAP spec differs from the
