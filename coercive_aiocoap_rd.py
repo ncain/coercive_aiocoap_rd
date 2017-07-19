@@ -3,14 +3,14 @@
 Essentially, a CoAP resource directory which coercively registers IoTivity
 resources in particular. This is achieved by querying IPv4 and IPv6 multicast
 addresses for the /oic/res path, as well as registering in the multicast groups
-and listening for advertisements of resources in the /oic/ad URI path. By
-storing both, it is possible to have a complete map of multicast-addressible
-resources on the local network. If an IoTivity device is configured to
-disregard multicast requests and respond only to unicast, those resources must
-be tracked separately. This could be achieved by adding a manual "register"
-method or function to this module, but I'm unsure how to automate it.
+and listening for advertisements of CoAP resources with a 2.05 CONTENT message
+code. By storing both, it is possible to have a complete map of
+multicast-addressible resources on the local network. If an IoTivity device is
+configured to disregard multicast requests and respond only to unicast, those
+resources must be tracked separately. This could be achieved by adding a manual
+"register" function to this module, but I'm unsure how to automate it.
 
-TODO:
+DONE:
     0. Implement active interrogation of the network for resources. [✔]
         0a. Send queries for /oic/res to multicast group addresses. [✔]
         0b. Parse received answers for storage as known resources. [✔]
@@ -41,6 +41,8 @@ TODO:
             2b(i). Implement an iterable class representing the set which
                 updates timestamps instead of silently ignoring duplicates. [✔]
             2b(ii). Instantiate and utilize the Resource_Set [✔]
+
+TODO:
     3. Implement manual registration for unicast-only resource storage? [ ]
     4. Implement persistent storage of known resources (files or db?). [ ]
     5. TEST THOROUGHLY. [ ]
@@ -54,10 +56,12 @@ BUG LIST:
 
         POSSIBLE FIXES:
             * Modify the library to only transmit once: we retransmit every few
-                minutes anyway.
+                minutes anyway. (note: there is a FIXME comment in the library
+                which alludes to the idea that the CoAP spec differs from the
+                aiocoap implementation of multicast retransmission.)
             * Extend the library to override the _deduplicate_message method in
                 order to change that behavior without modifying the library.
-            *
+            * Reroute error output to an actual log file?
 
 Last updated on July 19, 2017
 
@@ -71,8 +75,6 @@ from aiocoap.numbers import GET, NON, CONTENT
 import datetime
 import socket
 import struct
-# from threading import Lock, Thread
-# import time
 
 
 logging.basicConfig(level=logging.INFO)
@@ -112,13 +114,17 @@ class IoT_Resource:
     """
 
     def __init__(self, message: Message):
-        """Construct the resource."""
+        """Construct the resource.
+
+        URI and code are derived from the message, while last_seen is simply a
+        current timestamp.
+        """
         self.uri = message.opt.uri_path
         self.last_seen = datetime.datetime.now()
         self.code = message.code
 
     def __hash__(self):
-        """Hash the object by returning the hash of the URI path.
+        """Hash the object by returning the hash of the URI path (a string).
 
         Caveat: string hashes involve a random salt. The same string won't have
         the same hash from one execution of a script to another. Don't rely on
@@ -127,10 +133,16 @@ class IoT_Resource:
         return hash(self.uri)
 
     def __eq__(self, other):
-        """Compare objects by URI alone. Timestamp is updated otherwise."""
+        """Compare resources by URI.
+
+        Code could be relevant in adapting this class to a more general role,
+        but tracking IoTivity resources as such doesn't really require knowing
+        timestamps or message codes.
+        """
         return self.uri is other.uri
 
     def __repr__(self):
+        """Produce a string representation of the object."""
         return repr(self.uri) + " seen at " + self.last_seen.isoformat(' ')
 
     def update_timestamp(self):
@@ -148,7 +160,7 @@ class IoT_Resource_Set:
         self.set = set()
 
     async def add(self, element: IoT_Resource):
-        """Add an element to the set."""
+        """Add an IoT_Resource to the set."""
         with await self.lock:
             if element is not None and element.code is CONTENT:
                 if element not in self.set:
@@ -159,7 +171,7 @@ class IoT_Resource_Set:
                     set.add(element)
 
     def __iter__(self):
-        """Return an iterator for the underlying set."""
+        """Generator which iterates over the underlying set."""
         for element in self.set:
             self.lock.acquire()
             yield element
@@ -219,7 +231,10 @@ def uri_oic_res(addr: str) -> str:
 
 
 async def multicast(client_protocol: protocol.Context, address: str):
-    """Send a multicast request for /oic/res, giving 10 seconds to answer."""
+    """Send a multicast request for /oic/res once.
+
+    Well, ask the library to request once. It requests six times.
+    """
     answers = set()
     message = Message(code=GET, mtype=NON, uri=uri_oic_res(address))
     request = protocol.MulticastRequest(client_protocol, message)
@@ -232,9 +247,9 @@ async def multicast(client_protocol: protocol.Context, address: str):
 
 def bind_multicast_listener(addr: str, port: int=COAP_PORT) -> socket.socket:
     """
-    Bind a socket at addr and port, and listen in non-exclusive mode.
+    Bind a socket at addr and port.
 
-    Creates and binds the socket, returning it with options set.
+    Creates and binds the socket, returning it with appropriate options set.
     """
     return (bind_v4_socket(addr) if "." in addr else bind_v6_socket(addr))
 
@@ -263,8 +278,8 @@ def bind_v6_socket(addr: str, port: int=COAP_PORT) -> socket.socket:
     return sock
 
 
-async def multicast_listen(sock: socket.socket):
-    """Wrap a generator so it can be awaited."""
+async def multicast_listen(sock: socket.socket) -> IoT_Resource:
+    """Wrap a socket's recvfrom for await and returning an IoT_Resource."""
     try:
         raw = sock.recvfrom(1152)
         message = Message.decode(raw[0], raw[1][0])
