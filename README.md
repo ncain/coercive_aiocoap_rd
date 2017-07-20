@@ -1,6 +1,8 @@
 # coercive_aiocoap_rd
 Query and listen for multicast-accessible IoTivity resources.
 
+Tested only in Python 3.6 so far.
+
 Essentially, a CoAP resource directory which coercively registers IoTivity
 resources in particular. This is achieved by querying IPv4 and IPv6 multicast
 addresses for the /oic/res path, as well as registering in the multicast groups
