@@ -67,3 +67,4 @@ BUG LIST:
             * Extend the library to override the \_deduplicate_message method in
                 order to change that behavior without modifying the library.
             * Reroute error output to an actual log file?
+            * Silently ignore (disable) INFO-level logging?
