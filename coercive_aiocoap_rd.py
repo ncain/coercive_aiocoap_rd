@@ -8,9 +8,9 @@ import logging
 import asyncio
 from aiocoap import Context, Message, protocol
 from aiocoap.numbers import GET, NON, CONTENT
-import datetime
 import socket
 import struct
+import sqlite3
 
 
 logging.basicConfig(level=logging.INFO)
@@ -43,76 +43,17 @@ LINK_LOCAL_SCOPE = 2
 SITE_LOCAL_SCOPE = 5
 
 
-class IoT_Resource:
-    """An IoTivity resource, described by URI path and a timestamp.
-
-    This class is defined so that it can be stored in a set, in order to avoid
-    the need to deduplicate by hand.
-    """
-
-    def __init__(self, message: Message):
-        """Construct the resource.
-
-        URI and code are derived from the message, while last_seen is simply a
-        current timestamp.
-        """
-        self.uri = message.opt.uri_path
-        self.last_seen = datetime.datetime.now()
-        self.code = message.code
-
-    def __hash__(self):
-        """Hash the object by returning the hash of the URI path (a string).
-
-        Caveat: string hashes involve a random salt. The same string won't have
-        the same hash from one execution of a script to another. Don't rely on
-        storing the hashes persistently; store the source strings.
-        """
-        return hash(self.uri)
-
-    def __eq__(self, other):
-        """Compare resources by URI.
-
-        Code could be relevant in adapting this class to a more general role,
-        but tracking IoTivity resources as such doesn't really require knowing
-        timestamps or message codes.
-        """
-        return self.uri is other.uri
-
-    def __repr__(self):
-        """Produce a string representation of the object."""
-        return repr(self.uri) + " seen at " + self.last_seen.isoformat(' ')
-
-    def update_timestamp(self):
-        """Set the last_seen field to the current datetime."""
-        self.last_seen = datetime.datetime.now()
+def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
+    try:
+        return sqlite3.connect(sqlite_db_file)
+    except sqlite3.Error:
+        print('Failed to create a connection to the database.')
 
 
-class IoT_Resource_Set:
-    """A synchronized collection of IoT_Resource objects."""
-    def __init__(self, lock: asyncio.Lock=None):
-        if lock is None:
-            self.lock = asyncio.Lock()
-        else:
-            self.lock = lock
-        self.set = set()
-
-    async def add(self, element: IoT_Resource):
-        """Add an IoT_Resource to the set."""
-        with await self.lock:
-            if element is not None and element.code is CONTENT:
-                if element not in self.set:
-                    set.add(element)
-                else:
-                    set.remove(element)
-                    element.update_timestamp()
-                    set.add(element)
-
-    def __iter__(self):
-        """Generator which iterates over the underlying set."""
-        for element in self.set:
-            self.lock.acquire()
-            yield element
-            self.lock.release()
+def _insert(cursor: sqlite3.Cursor, message: Message):
+    if message is not None and message.code is CONTENT:
+        cursor.execute('REPLACE INTO resources (uri) values ?',
+                       message.opt.uri_path)
 
 
 async def main():
@@ -122,39 +63,50 @@ async def main():
     Actively queries and passively listens for 2.05 CONTENT messages at
     multicast addresses.
     """
-    link_coap_sock = bind_multicast_listener(ALL_LINK_LOCAL_COAP)
-    site_coap_sock = bind_multicast_listener(ALL_SITE_LOCAL_COAP)
-    link_node_sock = bind_multicast_listener(ALL_LINK_LOCAL_NODES)
-    site_node_sock = bind_multicast_listener(ALL_SITE_LOCAL_NODES)
-    snet_coap_sock = bind_multicast_listener(ALL_COAP_THIS_NETWORK)
-    snet_node_sock = bind_multicast_listener(ALL_SYSTEMS_THIS_SUBNET)
+    database_connection = connect_to_database('known_resources.db')
+    cursor = database_connection.cursor()
+    cursor.execute('CREATE TABLE IF NOT EXISTS resources (\n' +
+                   'id integer PRIMARY KEY,\n' +
+                   'uri text UNIQUE NOT NULL,\n' +
+                   'last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
+                   ');')
+    sockets = list()
+    for address in (
+        ALL_COAP_THIS_NETWORK,
+        ALL_SYSTEMS_THIS_SUBNET,
+        ALL_LINK_LOCAL_COAP,
+        ALL_SITE_LOCAL_COAP,
+        ALL_LINK_LOCAL_NODES,
+        ALL_SITE_LOCAL_NODES
+    ):
+        sockets.append(bind_multicast_listener(address))
 
-    found = IoT_Resource_Set()
     client_protocol = await Context.create_client_context()
-
-    while True:
-        await found.add(await multicast_listen(link_coap_sock))
-        await found.add(await multicast_listen(site_coap_sock))
-        await found.add(await multicast_listen(link_node_sock))
-        await found.add(await multicast_listen(site_node_sock))
-        await found.add(await multicast_listen(snet_coap_sock))
-        await found.add(await multicast_listen(snet_node_sock))
-        for address in (
-            ALL_COAP_THIS_NETWORK,
-            ALL_SYSTEMS_THIS_SUBNET,
-            v6(ALL_LINK_LOCAL_COAP),
-            v6(ALL_SITE_LOCAL_COAP),
-            v6(ALL_LINK_LOCAL_NODES),
-            v6(ALL_SITE_LOCAL_NODES)
-        ):
-            for resource in await multicast(client_protocol, address):
-                await found.add(resource)
-        if found.set:
-            print('Found resources: ')
-            for resource in found:
-                if resource is not None:
-                    print(repr(resource))
-        await asyncio.sleep(180)
+    try:
+        while True:
+            for sock in sockets:
+                _insert(cursor, await multicast_listen(sock))
+            for address in (
+                ALL_COAP_THIS_NETWORK,
+                ALL_SYSTEMS_THIS_SUBNET,
+                v6(ALL_LINK_LOCAL_COAP),
+                v6(ALL_SITE_LOCAL_COAP),
+                v6(ALL_LINK_LOCAL_NODES),
+                v6(ALL_SITE_LOCAL_NODES)
+            ):
+                for resource in await multicast(client_protocol, address):
+                    _insert(resource)
+            cursor.execute('SELECT uri, last_seen FROM resources')
+            all_rows = cursor.fetchall()
+            if all_rows:
+                print('Found resources: ')
+                for row in cursor:
+                    print(row["uri"] + ' last seen at ' + row["last_seen"])
+            await asyncio.sleep(180)
+    except (KeyboardInterrupt, SystemExit):
+        cursor.close()
+        database_connection.commit()
+        database_connection.close()
 
 
 def v6(addr: str) -> str:
@@ -178,7 +130,7 @@ async def multicast(client_protocol: protocol.Context, address: str):
     if not request.responses._queue.empty():
         async for response in request.responses:
             if response not in answers:
-                answers.add(IoT_Resource(message))
+                answers.add(message)
     return answers
 
 
@@ -215,7 +167,7 @@ def bind_v6_socket(addr: str, port: int=COAP_PORT) -> socket.socket:
     return sock
 
 
-async def multicast_listen(sock: socket.socket) -> IoT_Resource:
+async def multicast_listen(sock: socket.socket) -> Message:
     """Wrap a socket's recvfrom for await and returning an IoT_Resource."""
     try:
         raw = sock.recvfrom(1152)
@@ -223,7 +175,7 @@ async def multicast_listen(sock: socket.socket) -> IoT_Resource:
         while (message.code is not CONTENT):
             raw = sock.recvfrom(1152)
             message = Message.decode(raw[0], raw[1][0])
-        return IoT_Resource(message)
+        return message
     except BlockingIOError:
         return None
 
