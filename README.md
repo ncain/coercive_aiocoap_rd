@@ -40,16 +40,18 @@ DONE:
         1d. Filter messages for "2.05 Content" (instead of URI filtering)? [✔]
             (Code is 0x45 for 2.05, after 8 bits of other coap header data.)
     2. Store known resources sensibly in memory. [✔]
-        2a. Implement a class representing IoT resources. [✔]
-        2b. Store a set of them somewhere that it will be kept up-to-date. [✔]
+        2a. Implement a class representing IoT resources. [x]
+        2b. Store a set of them somewhere that it will be kept up-to-date. [x]
             2b(i). Implement an iterable class representing the set which
-                updates timestamps instead of silently ignoring duplicates. [✔]
-            2b(ii). Instantiate and utilize the Resource_Set [✔]
+                updates timestamps instead of silently ignoring duplicates. [x]
+            2b(ii). Instantiate and utilize the Resource_Set [x]
+        2c. Replace with database integration [✔]
+    3. Implement persistent storage of known resources (db). [✔]
 
 TODO:
 
-    3. Implement manual registration for unicast-only resource storage? [ ]
-    4. Implement persistent storage of known resources (files or db?). [ ]
+    4. Implement manual registration for unicast-only resource storage? [ ]
+        note: on roadmap, not a priority.
     5. TEST THOROUGHLY. [ ]
     6. REFACTOR INTO SEPARATE MODULES. [ ]
 
