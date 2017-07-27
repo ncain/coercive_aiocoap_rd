@@ -72,3 +72,6 @@ BUG LIST:
                 order to change that behavior without modifying the library.
             * Reroute error output to an actual log file?
             * Silently ignore (disable) INFO-level logging?
+
+        IMPLEMENTED FIX:
+            * currently disabling INFO-level logging.
