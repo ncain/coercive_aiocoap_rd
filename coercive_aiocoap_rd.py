@@ -42,6 +42,8 @@ ALL_SYSTEMS_THIS_SUBNET = '224.0.0.1'
 LINK_LOCAL_SCOPE = 2
 SITE_LOCAL_SCOPE = 5
 
+running = True
+
 
 def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
     try:
@@ -82,31 +84,29 @@ async def main():
         sockets.append(bind_multicast_listener(address))
 
     client_protocol = await Context.create_client_context()
-    try:
-        while True:
-            for sock in sockets:
-                _insert(cursor, await multicast_listen(sock))
-            for address in (
-                ALL_COAP_THIS_NETWORK,
-                ALL_SYSTEMS_THIS_SUBNET,
-                v6(ALL_LINK_LOCAL_COAP),
-                v6(ALL_SITE_LOCAL_COAP),
-                v6(ALL_LINK_LOCAL_NODES),
-                v6(ALL_SITE_LOCAL_NODES)
-            ):
-                for resource in await multicast(client_protocol, address):
-                    _insert(resource)
-            cursor.execute('SELECT uri, last_seen FROM resources')
-            all_rows = cursor.fetchall()
-            if all_rows:
-                print('Found resources: ')
-                for row in cursor:
-                    print(row["uri"] + ' last seen at ' + row["last_seen"])
-            await asyncio.sleep(180)
-    except (KeyboardInterrupt, SystemExit):
-        cursor.close()
-        database_connection.commit()
-        database_connection.close()
+    while running:
+        for sock in sockets:
+            _insert(cursor, await multicast_listen(sock))
+        for address in (
+            ALL_COAP_THIS_NETWORK,
+            ALL_SYSTEMS_THIS_SUBNET,
+            v6(ALL_LINK_LOCAL_COAP),
+            v6(ALL_SITE_LOCAL_COAP),
+            v6(ALL_LINK_LOCAL_NODES),
+            v6(ALL_SITE_LOCAL_NODES)
+        ):
+            for resource in await multicast(client_protocol, address):
+                _insert(resource)
+        cursor.execute('SELECT uri, last_seen FROM resources')
+        all_rows = cursor.fetchall()
+        if all_rows:
+            print('Found resources: ')
+            for row in cursor:
+                print(row["uri"] + ' last seen at ' + row["last_seen"])
+        await asyncio.sleep(180)
+    cursor.close()
+    database_connection.commit()
+    database_connection.close()
 
 
 def v6(addr: str) -> str:
@@ -182,4 +182,13 @@ async def multicast_listen(sock: socket.socket) -> Message:
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    try:
+        loop.run_until_complete(main())
+    except (KeyboardInterrupt, SystemExit):
+        pass
+    finally:
+        running = False
+        pending = asyncio.Task.all_tasks()
+        loop.run_until_complete(asyncio.gather(*pending))
+        loop.close()
+        print()
