@@ -55,8 +55,9 @@ def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
 
 def _insert(cursor: sqlite3.Cursor, message: Message):
     if message is not None and message.code is CONTENT:
-        cursor.execute('REPLACE INTO resources (uri) values ?',
-                       message.opt.uri_path)
+        cursor.execute("REPLACE INTO resources (uri) values ('?')",
+                       (message.opt.uri_path,))
+        print('inserting message: ' + repr(message))
 
 
 async def main(database_connection: sqlite3.Connection,
@@ -67,11 +68,11 @@ async def main(database_connection: sqlite3.Connection,
     Actively queries and passively listens for 2.05 CONTENT messages at
     multicast addresses.
     """
-    cursor.execute('CREATE TABLE IF NOT EXISTS resources (\n' +
-                   'id integer PRIMARY KEY,\n' +
-                   'uri text UNIQUE NOT NULL,\n' +
-                   'last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP'
-                   ');')
+    cursor.execute("""CREATE TABLE IF NOT EXISTS resources (
+                   id integer PRIMARY KEY,
+                   uri text UNIQUE NOT NULL,
+                   last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                   );""")
     sockets = list()
     for address in (
         ALL_COAP_THIS_NETWORK,
@@ -86,7 +87,9 @@ async def main(database_connection: sqlite3.Connection,
     client_protocol = await Context.create_client_context()
     while running:
         for sock in sockets:
-            _insert(cursor, await multicast_listen(sock))
+            resource = await multicast_listen(sock)
+            if resource is not None:
+                _insert(cursor, resource)
         for address in (
             ALL_COAP_THIS_NETWORK,
             ALL_SYSTEMS_THIS_SUBNET,
@@ -96,14 +99,14 @@ async def main(database_connection: sqlite3.Connection,
             v6(ALL_SITE_LOCAL_NODES)
         ):
             for resource in await multicast(client_protocol, address):
-                _insert(resource)
+                _insert(cursor, resource)
         cursor.execute('SELECT uri, last_seen FROM resources')
         all_rows = cursor.fetchall()
         if all_rows:
             print('Found resources: ')
             for row in cursor:
                 print(row["uri"] + ' last seen at ' + row["last_seen"])
-        await asyncio.sleep(180)
+        await asyncio.sleep(10)
 
 
 def v6(addr: str) -> str:
@@ -119,15 +122,17 @@ def uri_oic_res(addr: str) -> str:
 async def multicast(client_protocol: protocol.Context, address: str):
     """Send a multicast request for /oic/res once.
 
-    Well, ask the library to request once. It requests six times.
+    Well, ask the aiocoap library to request once. It requests six times.
+
+    Returns an aiocoap Message.
     """
     answers = set()
     message = Message(code=GET, mtype=NON, uri=uri_oic_res(address))
     request = protocol.MulticastRequest(client_protocol, message)
-    if not request.responses._queue.empty():
-        async for response in request.responses:
-            if response not in answers:
-                answers.add(message)
+    # if not request.responses._queue.empty():
+    async for response in request.responses:
+        if response not in answers:
+            answers.add(message)
     return answers
 
 
@@ -165,7 +170,7 @@ def bind_v6_socket(addr: str, port: int=COAP_PORT) -> socket.socket:
 
 
 async def multicast_listen(sock: socket.socket) -> Message:
-    """Wrap a socket's recvfrom for await and returning an IoT_Resource."""
+    """Wrap a socket's recvfrom for await and returning an aiocoap Message."""
     try:
         raw = sock.recvfrom(1152)
         message = Message.decode(raw[0], raw[1][0])

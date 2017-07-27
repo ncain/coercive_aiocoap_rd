@@ -75,3 +75,4 @@ BUG LIST:
 
         IMPLEMENTED FIX:
             * currently disabling INFO-level logging.
+    2. Not currently writing any discovered resources to the database.
