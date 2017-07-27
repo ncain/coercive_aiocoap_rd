@@ -8,6 +8,7 @@ import logging
 import asyncio
 from aiocoap import Context, Message, protocol
 from aiocoap.numbers import GET, NON, CONTENT
+from contextlib import suppress
 import socket
 import struct
 import sqlite3
@@ -189,6 +190,9 @@ if __name__ == "__main__":
     finally:
         running = False
         pending = asyncio.Task.all_tasks()
-        loop.run_until_complete(asyncio.gather(*pending))
+        for task in pending:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                loop.run_until_complete(task)
         loop.close()
         print()
