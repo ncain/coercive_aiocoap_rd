@@ -59,15 +59,14 @@ def _insert(cursor: sqlite3.Cursor, message: Message):
                        message.opt.uri_path)
 
 
-async def main():
+async def main(database_connection: sqlite3.Connection,
+               cursor: sqlite3.Cursor):
     """
     Gather and store (print, currently) IoTivity resource information.
 
     Actively queries and passively listens for 2.05 CONTENT messages at
     multicast addresses.
     """
-    database_connection = connect_to_database('known_resources.db')
-    cursor = database_connection.cursor()
     cursor.execute('CREATE TABLE IF NOT EXISTS resources (\n' +
                    'id integer PRIMARY KEY,\n' +
                    'uri text UNIQUE NOT NULL,\n' +
@@ -105,9 +104,6 @@ async def main():
             for row in cursor:
                 print(row["uri"] + ' last seen at ' + row["last_seen"])
         await asyncio.sleep(180)
-    cursor.close()
-    database_connection.commit()
-    database_connection.close()
 
 
 def v6(addr: str) -> str:
@@ -182,9 +178,11 @@ async def multicast_listen(sock: socket.socket) -> Message:
 
 
 if __name__ == "__main__":
+    database_connection = connect_to_database('known_resources.db')
+    cursor = database_connection.cursor()
     loop = asyncio.get_event_loop()
     try:
-        loop.run_until_complete(main())
+        loop.run_until_complete(main(database_connection, cursor))
     except (KeyboardInterrupt, SystemExit):
         pass
     finally:
@@ -195,4 +193,7 @@ if __name__ == "__main__":
             with suppress(asyncio.CancelledError):
                 loop.run_until_complete(task)
         loop.close()
+        cursor.close()
+        database_connection.commit()
+        database_connection.close()
         print()
