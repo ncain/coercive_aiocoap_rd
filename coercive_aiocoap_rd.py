@@ -55,9 +55,12 @@ def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
 
 def _insert(cursor: sqlite3.Cursor, message: Message):
     if message is not None and message.code is CONTENT:
-        cursor.execute("REPLACE INTO resources (uri) values ('?')",
-                       (message.opt.uri_path,))
-        print('inserting message: ' + repr(message))
+        host = message.opt.uri_host
+        path = message.opt.uri_path
+        uri = 'coap://' + host
+        for segment in path:
+            uri += '/' + segment
+        cursor.execute("REPLACE INTO resources (uri) VALUES (?)", [uri])
 
 
 async def main(database_connection: sqlite3.Connection,

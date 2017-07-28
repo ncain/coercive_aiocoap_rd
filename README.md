@@ -76,3 +76,5 @@ BUG LIST:
         IMPLEMENTED FIX:
             * currently disabling INFO-level logging.
     2. Not currently writing any discovered resources to the database.
+        * Database is now being written when \_insert() is called with contrived
+            inputs. Still need to test actual discovery of networked resources.
