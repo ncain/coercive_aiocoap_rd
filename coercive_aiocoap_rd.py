@@ -54,9 +54,13 @@ def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
 
 
 def _insert(cursor: sqlite3.Cursor, message: Message):
+    if message is None:
+        print('Why are we getting None messages!?')
     if message is not None and message.code is CONTENT:
         host = message.opt.uri_host
+        print('Host: ' + repr(host))
         path = message.opt.uri_path
+        print('Path: ' + repr(path))
         uri = 'coap://' + host
         for segment in path:
             uri += '/' + segment
@@ -78,11 +82,11 @@ async def main(database_connection: sqlite3.Connection,
                    );""")
     sockets = list()
     for address in (
-        ALL_COAP_THIS_NETWORK,
-        ALL_SYSTEMS_THIS_SUBNET,
         ALL_LINK_LOCAL_COAP,
         ALL_SITE_LOCAL_COAP,
         ALL_LINK_LOCAL_NODES,
+        ALL_COAP_THIS_NETWORK,
+        ALL_SYSTEMS_THIS_SUBNET,
         ALL_SITE_LOCAL_NODES
     ):
         sockets.append(bind_multicast_listener(address))
@@ -90,8 +94,7 @@ async def main(database_connection: sqlite3.Connection,
     client_protocol = await Context.create_client_context()
     while running:
         for sock in sockets:
-            resource = await multicast_listen(sock)
-            if resource is not None:
+            async for resource in multicast_listen(sock):
                 _insert(cursor, resource)
         for address in (
             ALL_COAP_THIS_NETWORK,
@@ -132,10 +135,10 @@ async def multicast(client_protocol: protocol.Context, address: str):
     answers = set()
     message = Message(code=GET, mtype=NON, uri=uri_oic_res(address))
     request = protocol.MulticastRequest(client_protocol, message)
-    # if not request.responses._queue.empty():
-    async for response in request.responses:
-        if response not in answers:
-            answers.add(message)
+    with suppress(asyncio.StopAsyncIteration):
+        async for response in request.responses:
+            if response not in answers:
+                answers.add(message)
     return answers
 
 
@@ -173,16 +176,30 @@ def bind_v6_socket(addr: str, port: int=COAP_PORT) -> socket.socket:
 
 
 async def multicast_listen(sock: socket.socket) -> Message:
-    """Wrap a socket's recvfrom for await and returning an aiocoap Message."""
-    try:
-        raw = sock.recvfrom(1152)
-        message = Message.decode(raw[0], raw[1][0])
-        while (message.code is not CONTENT):
+    """Wrap recvfrom in an async generator which yields aiocoap Messages."""
+    while True:
+        try:
+            # PATH IS ONLY EVER /oic/ad
+            # because it's decoded from metadata, NOT payload!
+            # Need to parse raw[0] ourselves, most likely.
+            # although uri-host should be about "the resource being requested"
+            # ...is the IoTivity Presence Server example out-of-spec?
+            # further investigation is needed.
             raw = sock.recvfrom(1152)
             message = Message.decode(raw[0], raw[1][0])
-        return message
-    except BlockingIOError:
-        return None
+            print('payload: ' + repr(message.payload))
+            print('options:')
+            for number, option in message.opt._options.items():
+                print(repr(number) + ':')
+                for element in option:
+                    print(element.value)
+            message.set_request_uri('coap://' + raw[1][0] + ':5683')
+            while (message.code is not CONTENT):
+                raw = sock.recvfrom(1152)
+                message = Message.decode(raw[0], raw[1][0])
+            yield message
+        except BlockingIOError:
+            await asyncio.sleep(5)
 
 
 if __name__ == "__main__":
