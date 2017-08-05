@@ -76,17 +76,25 @@ BUG LIST:
         IMPLEMENTED FIX:
             * currently disabling INFO-level logging.
     2. Not currently writing any discovered resources to the database.
-        * Database is now being written when \_insert() is called with contrived
-            inputs. Still need to test actual discovery of networked resources.
+        *   Database is now being written when \_insert() is called with
+            contrived inputs. Still need to test actual discovery of networked
+            resources.
     3. Passive listener decodes resources incorrectly: always places them at
         /oic/ad, because Message decodes based on the header rather than the
         payload. Need to parse the bytes given by recvfrom in order to construct
         the correct URI for the resource. Message payloads are commonly CBOR.
-        * CBOR: is it used always by IoTivity? Is it just common?
-        * Is this a result of the IoTivity Presence Server example being out of
-            spec? There is (according to Wireshark's CoAP parser) a malformed
+        *   CBOR: is it used always by IoTivity? Is it just common?
+        *   Is this a result of the IoTivity Presence Server example being out
+            of spec? There is (according to Wireshark's CoAP parser) a malformed
             section of the /oic/ad announcements sent by it (option #3: type 12)
             with length 1 and then the invalid option number 65524 (the delta is
             4 bits long, and specified as 0xe after the previous option number
             was 0xb or 11- is this a bug in wireshark's parser? Saving the pcap
             for further investigation. Will upload to GitHub if anyone asks.)
+    4. When the presence server advertises at /oic/ad, the 2.05 CONTENT message
+        has a payload that fails to parse with cbor.loads(). A basic Python
+        program to demonstrate that issue exists as cbor_test.py in this
+        repository. Payloads decode correctly when a CONTENT message is sent as
+        a response to a GET request, though. Is this a solution to a problem we
+        don't have? Did the active request produce bad results by querying the
+        uri-path instead of parsing the payload?

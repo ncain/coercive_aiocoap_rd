@@ -46,6 +46,12 @@ SITE_LOCAL_SCOPE = 5
 running = True
 
 
+class IoT_Resource:
+    """A simple representation of an IoTivity resource at a particular URI."""
+    def __init__(self, path: str, addr: str):
+        self.uri = addr + path
+
+
 def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
     try:
         return sqlite3.connect(sqlite_db_file)
@@ -136,6 +142,7 @@ async def multicast(client_protocol: protocol.Context, address: str):
     message = Message(code=GET, mtype=NON, uri=uri_oic_res(address))
     request = protocol.MulticastRequest(client_protocol, message)
     with suppress(asyncio.StopAsyncIteration):
+        # which should be implicitly caught and handled by async for...
         async for response in request.responses:
             if response not in answers:
                 answers.add(message)
@@ -185,6 +192,15 @@ async def multicast_listen(sock: socket.socket) -> Message:
             # although uri-host should be about "the resource being requested"
             # ...is the IoTivity Presence Server example out-of-spec?
             # further investigation is needed.
+            #
+            # message.payload is CBOR encoded (in this case - how to tell?)
+            # message.payload is also CBOR when running simpleserver and client
+            #
+            # grabbing and reading pcaps isn't necessarily the most efficient
+            # way to determine payload encoding. URI-Path is /oic/res when in
+            # the simpleserver and simpleclient pcap, so URI-Path was a dead
+            # end either way. Need to parse the payload. import cbor (I think?)
+            # https://github.com/brianolson/cbor_py/blob/master/cbor/cbor.py
             raw = sock.recvfrom(1152)
             message = Message.decode(raw[0], raw[1][0])
             print('payload: ' + repr(message.payload))
