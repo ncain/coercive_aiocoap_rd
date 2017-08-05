@@ -98,3 +98,14 @@ BUG LIST:
         a response to a GET request, though. Is this a solution to a problem we
         don't have? Did the active request produce bad results by querying the
         uri-path instead of parsing the payload?
+        *   By changing to the cbor2 library, it now parses as a dictionary
+            directly, rather than throwing an exception. However, the only
+            useful information in the message is the resource type, which isn't
+            enough to uniquely identify the resource. We probably need to have
+            the RD subscribe in response to the /oic/ad message, per
+            https://wiki.iotivity.org/resource_presence
+            in order to get more complete resource information. This likely
+            amounts to just another CoAP message designed to correspond (match
+            nonce? same message id? review spec to be sure.) Also helpfully, the
+            cbor2 lib has good documentation available at
+            http://cbor2.readthedocs.io/en/latest/usage.html
