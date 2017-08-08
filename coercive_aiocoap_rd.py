@@ -7,11 +7,13 @@ See README.md for in-depth module description.
 import logging
 import asyncio
 from aiocoap import Context, Message, protocol
+from aiocoap.error import UnparsableMessage
 from aiocoap.numbers import GET, NON, CONTENT
 from contextlib import suppress
 import socket
 import struct
 import sqlite3
+import cbor2
 
 
 logging.basicConfig(level=logging.INFO)
@@ -63,7 +65,9 @@ def _insert(cursor: sqlite3.Cursor, message: Message):
     if message is None:
         print('Why are we getting None messages!?')
     if message is not None and message.code is CONTENT:
-        host = message.opt.uri_host
+        payload = cbor2.loads(message.payload)
+        print('Payload: ' + repr(payload))  # format can be inconsistent.
+        host = message.opt.remote  # uri-host isn't right, but remote might be
         print('Host: ' + repr(host))
         path = message.opt.uri_path
         print('Path: ' + repr(path))
@@ -199,21 +203,21 @@ async def multicast_listen(sock: socket.socket) -> Message:
             # grabbing and reading pcaps isn't necessarily the most efficient
             # way to determine payload encoding. URI-Path is /oic/res when in
             # the simpleserver and simpleclient pcap, so URI-Path was a dead
-            # end either way. Need to parse the payload. import cbor (I think?)
-            # https://github.com/brianolson/cbor_py/blob/master/cbor/cbor.py
-            raw = sock.recvfrom(1152)
-            message = Message.decode(raw[0], raw[1][0])
-            print('payload: ' + repr(message.payload))
-            print('options:')
-            for number, option in message.opt._options.items():
-                print(repr(number) + ':')
-                for element in option:
-                    print(element.value)
-            message.set_request_uri('coap://' + raw[1][0] + ':5683')
-            while (message.code is not CONTENT):
+            # end either way. Need to parse the payload.
+            with suppress(UnparsableMessage):
                 raw = sock.recvfrom(1152)
-                message = Message.decode(raw[0], raw[1][0])
-            yield message
+                message = Message.decode(rawdata=raw[0], remote=raw[1][0])
+                print('payload: ' + repr(message.payload))
+                print('options:')
+                for number, option in message.opt._options.items():
+                    print(repr(number) + ':')
+                    for element in option:
+                        print(element.value)
+                # message.set_request_uri('coap://' + raw[1][0] + ':5683')
+                while (message.code is not CONTENT):
+                    raw = sock.recvfrom(1152)
+                    message = Message.decode(raw[0], raw[1][0])
+                yield message
         except BlockingIOError:
             await asyncio.sleep(5)
 
