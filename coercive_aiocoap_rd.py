@@ -38,12 +38,16 @@ ALL_SYSTEMS_THIS_SUBNET = '224.0.0.1'
 #
 # The port 5683 is the default CoAP port.
 # The port 5684 is the default DTLS-secured CoAP (coaps) port.
-# Need to listen on a network-attached interface for 2.05 Content messages
-# (generally sent as response to multicast, or as multicasts themselves)
 #
 # Address scope constants:
 LINK_LOCAL_SCOPE = 2
 SITE_LOCAL_SCOPE = 5
+
+# Well-Known IoTivity resources (uninteresting - don't collect info about them)
+# also incomplete
+WELL_KNOWN_TYPES = (
+    'oic.wk.ad', 'oic.wk.p', 'oic.wk.d', 'oic.r.pstat', 'oic.r.doxm'
+    )
 
 running = True
 
@@ -220,6 +224,35 @@ async def multicast_listen(sock: socket.socket) -> Message:
                 yield message
         except BlockingIOError:
             await asyncio.sleep(5)
+
+
+def get_resource_types(message: Message) -> list:
+    """Parse a message payload in search of an 'rt' field."""
+    types = list()
+    if message.payload:
+        payload = cbor2.loads(message.payload)
+        if isinstance(payload, dict) and 'rt' in payload:
+            types.append(payload.get('rt'))
+        elif isinstance(payload, list) and 'links' in payload[0]:
+            for link in payload[0]['links']:
+                for resource_type in link['rt']:
+                    if resource_type not in WELL_KNOWN_TYPES:
+                        types.append(resource_type)
+    return types if types is not list() else None
+
+
+def get_resource_links(message: Message) -> list:
+    """Parse a message payload in search of 'href' fields."""
+    links = list()
+    if message.payload:
+        payload = cbor2.loads(message.payload)
+        if isinstance(payload, list) and 'links' in payload[0]:
+            for link in payload[0]['links']:
+                for resource_type in link['rt']:
+                    if (resource_type not in WELL_KNOWN_TYPES and
+                       link['href'] not in links):
+                        links.append(link['href'])
+    return links if links is not list() else None
 
 
 if __name__ == "__main__":
