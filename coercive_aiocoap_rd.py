@@ -54,8 +54,9 @@ running = True
 
 class IoT_Resource:
     """A simple representation of an IoTivity resource at a particular URI."""
-    def __init__(self, path: str, addr: str):
-        self.uri = addr + path
+    def __init__(self, path: str, resource_type: str):
+        self.path = path
+        self.resource_type = resource_type
 
 
 def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
@@ -65,20 +66,27 @@ def connect_to_database(sqlite_db_file: str) -> sqlite3.Connection:
         print('Failed to create a connection to the database.')
 
 
-def _insert(cursor: sqlite3.Cursor, message: Message):
+def _insert(cursor: sqlite3.Cursor, message: Message,
+            client_protocol: protocol.Context):
     if message is None:
         print('Why are we getting None messages!?')
-    if message is not None and message.code is CONTENT:
-        payload = cbor2.loads(message.payload)
-        print('Payload: ' + repr(payload))  # format can be inconsistent.
+    elif message.code is CONTENT:
         host = message.opt.remote  # uri-host isn't right, but remote might be
-        print('Host: ' + repr(host))
-        path = message.opt.uri_path
-        print('Path: ' + repr(path))
-        uri = 'coap://' + host
-        for segment in path:
-            uri += '/' + segment
-        cursor.execute("REPLACE INTO resources (uri) VALUES (?)", [uri])
+        for path in get_resource_links(message, client_protocol):
+            # better would be a list of IoT_Resource objects.
+            # currently, rt (resource type) isn't set, because there's no way
+            # to correlate rt and host + path. Unfortunately, one message can
+            # correspond to multiple paths, and each path can correspond to
+            # multiple resource types. It would be best to store the resource
+            # types as a comma-separated list (or something) so that they're
+            # all retained: some are supposed to be human-readable, others
+            # aren't. Also worth storing: resource interface? I don't know that
+            # any interface other than oic.if.baseline is valid and defined.
+            # https://wiki.iotivity.org/common_resources for more info.
+            rt = None
+            cursor.execute("""REPLACE INTO resources
+                              (uri, resource_type)
+                              VALUES (?, ?)""", (host + path, rt))
 
 
 async def main(database_connection: sqlite3.Connection,
@@ -92,6 +100,7 @@ async def main(database_connection: sqlite3.Connection,
     cursor.execute("""CREATE TABLE IF NOT EXISTS resources (
                    id integer PRIMARY KEY,
                    uri text UNIQUE NOT NULL,
+                   resource_type text NOT NULL,
                    last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                    );""")
     sockets = list()
@@ -137,6 +146,19 @@ def v6(addr: str) -> str:
 def uri_oic_res(addr: str) -> str:
     """Modify an IP address so that it's a complete CoAP resource URI."""
     return 'coap://' + addr + '/oic/res'
+
+
+async def unicast_request(client_protocol: protocol.Context, address: str,
+                          resource: str='/oic/res', resource_type: str=None,
+                          destport: int=COAP_PORT):
+    """Send a unicast request for a resource at address via client_protocol"""
+    request_uri = 'coap://' + address + resource
+    if resource_type is not None:
+        request_uri += '?rt=' + resource_type
+    msg = Message(code=GET, mtype=NON, uri=request_uri)
+    req = protocol.Request(client_protocol, msg)
+    response = await req.response
+    return response if response.code is CONTENT else None
 
 
 async def multicast(client_protocol: protocol.Context, address: str):
@@ -218,7 +240,8 @@ async def multicast_listen(sock: socket.socket) -> Message:
                     for element in option:
                         print(element.value)
                 # message.set_request_uri('coap://' + raw[1][0] + ':5683')
-                while (message.code is not CONTENT):
+                while (message.code is not CONTENT or
+                       get_resource_types(message) is None):
                     raw = sock.recvfrom(1152)
                     message = Message.decode(raw[0], raw[1][0])
                 yield message
@@ -241,17 +264,31 @@ def get_resource_types(message: Message) -> list:
     return types if types is not list() else None
 
 
-def get_resource_links(message: Message) -> list:
+async def get_resource_links(message: Message,
+                             client_protocol: protocol.Context) -> list:
     """Parse a message payload in search of 'href' fields."""
     links = list()
     if message.payload:
         payload = cbor2.loads(message.payload)
         if isinstance(payload, list) and 'links' in payload[0]:
-            for link in payload[0]['links']:
+            payload = payload[0]
+        if isinstance(payload, dict) and 'links' in payload:
+            for link in payload['links']:
                 for resource_type in link['rt']:
                     if (resource_type not in WELL_KNOWN_TYPES and
                        link['href'] not in links):
                         links.append(link['href'])
+        elif isinstance(payload, dict) and 'href' in payload:
+            links.append(link['href'])
+        elif isinstance(payload, dict) and 'rt' in payload:
+            # send a GET for whatever resource type at the port used in message
+            for resource_type in get_resource_types(message):
+                response = await unicast_request(client_protocol,
+                                                 message.remote, '/oic/res',
+                                                 resource_type,
+                                                 message.opt.uri_port)
+                links.append(await get_resource_links(response,
+                                                      client_protocol))
     return links if links is not list() else None
 
 
