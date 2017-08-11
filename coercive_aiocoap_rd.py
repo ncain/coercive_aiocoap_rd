@@ -166,7 +166,7 @@ async def multicast(client_protocol: Context, address: str):
     message = Message(code=GET, mtype=NON, uri=uri_oic_res(address))
     request = protocol.MulticastRequest(client_protocol, message)
     with suppress(asyncio.StopAsyncIteration):
-        # which should be implicitly caught and handled by async for...
+        # which should be implicitly caught and handled by 'async for'...
         async for response in request.responses:
             if response not in answers:
                 answers.add(message)
@@ -211,20 +211,6 @@ async def multicast_listen(sock: socket.socket,
     """Wrap recvfrom in an async generator which yields aiocoap Messages."""
     while True:
         try:
-            # PATH IS ONLY EVER /oic/ad
-            # because it's decoded from metadata, NOT payload!
-            # Need to parse raw[0] ourselves, most likely.
-            # although uri-host should be about "the resource being requested"
-            # ...is the IoTivity Presence Server example out-of-spec?
-            # further investigation is needed.
-            #
-            # message.payload is CBOR encoded (in this case - how to tell?)
-            # message.payload is also CBOR when running simpleserver and client
-            #
-            # grabbing and reading pcaps isn't necessarily the most efficient
-            # way to determine payload encoding. URI-Path is /oic/res when in
-            # the simpleserver and simpleclient pcap, so URI-Path was a dead
-            # end either way. Need to parse the payload.
             with suppress(UnparsableMessage):
                 raw = sock.recvfrom(1152)
                 message = Message.decode(rawdata=raw[0], remote=raw[1][0])
@@ -289,6 +275,7 @@ async def get_resource_links(client_protocol: Context,
             links.append(link['href'])
         elif isinstance(payload, dict) and 'rt' in payload:
             # send a GET for whatever resource type at the port used in message
+            # it might be necessary to specify /oic/ad, not /oic/res?
             for resource_type in get_resource_types(message):
                 response = await unicast_request(client_protocol,
                                                  message.remote,
